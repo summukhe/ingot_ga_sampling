@@ -49,11 +49,12 @@ def fun(c_state: IngotState):
 
 
 search = GASearch(fitness=fun,
-                  n_population=50,
-                  n_iteration=50,
+                  n_population=100,
+                  n_iteration=25,
                   generator=gen,
                   selector=RouletteSelector(max_partitions=10),
                   operator=updater,
+                  n_elites=5,
                   )
 
 res = search.search(verbose=True)

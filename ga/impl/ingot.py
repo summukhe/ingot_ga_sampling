@@ -50,37 +50,38 @@ class Ingot:
         return self._z_axis.copy()
 
     def _likelihood(self,
-                    x: Tuple[float, float, float]) -> float:
+                    x: List[Tuple[float, float, float]]) -> float:
         x = np.array(x).astype('float32') - self._base_center
 
         s = self._scale
         h = self._cylinder_height + self._cone_height
         err = s * self._allowed_error
         p = np.dot(x, self._z_axis)
-        if (p < -err) or (p > s * h + err):
-            return 0.0
+        idx = np.where((p > -err) & (p < s * h + err))[0]
+        if len(idx) == 0:
+            return 0.
+        p = p[idx]
+        px = p[..., np.newaxis] * self._z_axis[np.newaxis, ...]
+        d = np.sqrt(np.sum((x[idx] - px)**2, axis=1))
 
-        px = p * self._z_axis
-        d = np.sqrt(np.sum((x - px)**2))
+        base_idx = np.where((np.abs(p) < err) & (d < s * self._base_diameter + err))[0]
+        top_idx = np.where((np.abs(p - s * h) < err) & (d < s * self._cylinder_diameter + err))[0]
+        cyl_surf = np.where((p > self._cone_height) & (np.abs(d - s * self._cylinder_diameter) < err))[0]
 
-        if (np.abs(p) < err) and (d < s * self._base_diameter  + err):
-            return (0.5/err) * np.exp(-(np.abs(p)/err))
-        elif (np.abs(p - s * h) < err) and (d < s * self._cylinder_diameter  + err):
-            return (0.5/err) * np.exp(-(np.abs(p)/err))
-        else:
-            if p > self._cone_height:
-                dh = s * self._cylinder_diameter
-            else:
-                dh = s * (self._base_diameter +
-                          (p / self._cone_height) * (self._cylinder_diameter -
-                                                     self._base_diameter))
-            return (0.5/err) * np.exp(-(np.abs(d-dh)/err)) if np.abs(d - dh) < err else 0
+        cone_idx = np.where(p < self._cone_height)[0]
+
+        dh = s * (self._base_diameter + (p[cone_idx] / self._cone_height) * (self._cylinder_diameter -
+                                                                             self._base_diameter))
+        cone_surf = np.where(np.abs(d[cone_idx] - dh) < err)[0]
+        if len(cone_surf) > 0:
+            cone_surf = cone_idx[cone_surf]
+        surf_points = set(base_idx).union(top_idx).union(cyl_surf).union(cone_surf)
+        return len(surf_points)/x.shape[0]
 
     def likelihood(self,
                    points: List[Tuple[float, float, float]],
-                   thresh: float = 0.01):
-        p = np.array([self._likelihood(x) for x in points])
-        return len(np.where(p > thresh)[0])/len(p)
+                   thresh: float = 0.1):
+        return self._likelihood(np.array(points))
 
 
 if __name__ == "__main__":

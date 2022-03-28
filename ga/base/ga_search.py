@@ -1,3 +1,4 @@
+import time
 import numpy as np
 from typing import Callable, List
 from ga.base.chromosome import Chromosome
@@ -33,10 +34,13 @@ class GASearch:
 
         pop = self._initializer.sample(self._n_pop)
         for ii in range(self._n_iter):
+            start = time.time_ns()
             fv = np.array([self._fn(p) for p in pop])
-            self._selector.set_fitness(fv)
+            end = time.time_ns()
             if verbose:
+                print("Function evaluation time : {:.3f}ms".format((end - start)/1e6))
                 print("Max value: {:.5f}".format(np.max(fv)))
+            self._selector.set_fitness(fv)
             p = np.random.random(size=self._n_pop - n_elites)
             nm = len(np.where(p < p_mutation)[0])
             nx = len(p) - nm

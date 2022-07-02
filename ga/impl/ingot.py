@@ -19,6 +19,7 @@ class Ingot:
                  z_axis: Tuple[float, float, float] = (0, 0, 1),
                  scale: float = 1.0,
                  allowed_error: float = 1.0,
+                 allowed_inaccuracies: float = 0.05,
                  ):
         self._cylinder_diameter = top_diameter
         self._base_diameter = base_diameter
@@ -28,10 +29,15 @@ class Ingot:
         self._z_axis = unit_vector(*z_axis)
         self._scale = scale
         self._allowed_error = allowed_error
+        self._allowed_inaccuracy = allowed_inaccuracies
 
     @property
     def top_diameter(self) -> float:
         return self._cylinder_diameter
+
+    @property
+    def cylinder_height(self) -> float:
+        return self._cylinder_height
 
     @property
     def base_diameter(self) -> float:
@@ -49,6 +55,10 @@ class Ingot:
     def z_axis(self) -> np.ndarray:
         return self._z_axis.copy()
 
+    @property
+    def scale(self) -> float:
+        return self._scale
+
     def _likelihood(self,
                     x: List[Tuple[float, float, float]]) -> float:
         x = np.array(x).astype('float32') - self._base_center
@@ -63,12 +73,18 @@ class Ingot:
         p = p[idx]
         px = p[..., np.newaxis] * self._z_axis[np.newaxis, ...]
         d = np.sqrt(np.sum((x[idx] - px)**2, axis=1))
+        base_idx = np.where((np.abs(p) < err) &
+                            (d < s * self._base_diameter / 2 + err))[0]
 
-        base_idx = np.where((np.abs(p) < err) & (d < s * self._base_diameter + err))[0]
-        top_idx = np.where((np.abs(p - s * h) < err) & (d < s * self._cylinder_diameter + err))[0]
-        cyl_surf = np.where((p > self._cone_height) & (np.abs(d - s * self._cylinder_diameter) < err))[0]
+        top_idx = np.where((np.abs(p - s * h) < err) &
+                           (d < s * self._cylinder_diameter / 2 + err))[0]
+        cyl_surf = np.where((p > s * self._cone_height) &
+                            (p < s * h) &
+                            (np.abs(d - s * self._cylinder_diameter / 2) < err))[0]
+        cone_idx = np.where(p < s * self._cone_height)[0]
 
-        cone_idx = np.where(p < self._cone_height)[0]
+        cyl_intersection = np.where((p > s * self._cone_height) & (p < s * h) &
+                                    (d < (s * self._cylinder_diameter / 2) - err))[0]
 
         dh = s * (self._base_diameter + (p[cone_idx] / self._cone_height) * (self._cylinder_diameter -
                                                                              self._base_diameter))
@@ -76,7 +92,12 @@ class Ingot:
         if len(cone_surf) > 0:
             cone_surf = cone_idx[cone_surf]
         surf_points = set(base_idx).union(top_idx).union(cyl_surf).union(cone_surf)
-        return len(surf_points)/x.shape[0]
+        remaining = set(cyl_intersection).difference(surf_points)
+        if len(surf_points) == 0:
+            return 0
+        if len(remaining)/len(surf_points) > self._allowed_inaccuracy:
+            return 0
+        return (len(surf_points) - len(remaining))/x.shape[0]
 
     def likelihood(self,
                    points: List[Tuple[float, float, float]],
@@ -84,22 +105,3 @@ class Ingot:
         return self._likelihood(np.array(points))
 
 
-if __name__ == "__main__":
-    import os
-    import open3d as o3d
-
-    base_dir = os.path.dirname(os.path.realpath(__file__))
-    data_dir = os.path.join(base_dir, '../../data')
-    data_file = os.path.join(data_dir, 'Cropped_point_cloud.pcd')
-    pc = o3d.io.read_point_cloud(data_file)
-    data = np.array(pc.points, dtype='float32')
-
-    x_mx, y_mx, z_mx = np.max(data[:, 0]), np.max(data[:, 1]), np.max(data[:, 2])
-    x_mn, y_mn, z_mn = np.min(data[:, 0]), np.min(data[:, 1]), np.min(data[:, 2])
-
-    center = np.mean(data, axis=0)
-    scale = min(x_mx - x_mn, y_mx, y_mn)/250
-    ingot = Ingot(base_center=tuple(center),
-                  scale=scale)
-
-    print(ingot.likelihood(data))
